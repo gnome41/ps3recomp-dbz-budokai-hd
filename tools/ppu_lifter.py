@@ -1453,8 +1453,8 @@ class PPULifter:
             "le": f"(!((ctx->cr >> {shift}) & 4))",
             "so": f"((ctx->cr >> {shift}) & 1)",
             "ns": f"(!((ctx->cr >> {shift}) & 1))",
-            "dnz": "(--(ctx->ctr) != 0)",
-            "dz": "(--(ctx->ctr) == 0)",
+            "dnz": "((ctx->ctr = (uint32_t)(ctx->ctr - 1)) != 0)",
+            "dz": "((ctx->ctr = (uint32_t)(ctx->ctr - 1)) == 0)",
         }
 
         return cond_map.get(mn, f"/* cond: {mnemonic} */ 1")
