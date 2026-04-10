@@ -516,3 +516,12 @@ MIT License. See [LICENSE](LICENSE) for details.
 ---
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
+
+### v0.5.1 — *"All-Register FIFO"* (April 2026)
+- **All-register FIFO flag clearing**: PhyreEngine sets +0x18 pending flags on r27/r28/r30/r26 (4 structures). Previously only cleared r31. Now clears all, solving 2 of 3 init spin levels.
+- **Watchdog CTR=0 patching**: Background thread detects NULL function pointer spins, patches heap objects with NOP OPDs.
+- **D3D12 backend active**: Device FL11.0, vertex-colored PSO, batched DrawInstanced, VSync present. First GPU-rendered geometry from PS3 recomp.
+- **Level data rendering**: flOw XML level definitions parsed — authentic ocean gradient, snake creatures, food objects, particles. 486 vertices per frame.
+- **Batched DRAW_ARRAYS**: RSX method format caps at 255 verts per command. Auto-batching splits larger draws.
+- **Control register host-endian**: RSX MMIO accessed via lwbrx/stwbrx in recompiled code. Fixed endianness for put/get/ref.
+- **flOw progress**: D3D12 renders Level 3 scene at ~17fps. 12 subsystems ticking. Full GCM pipeline: NV40 → RSX processor → D3D12. Render context init blocked by 3rd-level data loop (no HLE escape).
