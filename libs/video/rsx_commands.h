@@ -93,6 +93,11 @@ extern "C" {
 #define NV4097_SET_TRANSFORM_PROGRAM_LOAD       0x00001E9C
 #define NV4097_SET_TRANSFORM_PROGRAM            0x00000B80
 #define NV4097_SET_TRANSFORM_CONSTANT_LOAD      0x00001EFC
+/* Vertex constants are written as up to 64 dwords (16 vec4s) per command,
+ * starting at 0x1F00. Slot = transform_constant_load + (reg/4); lane = reg%4.
+ * The hardware supports 512 vec4 constants total in the vertex register file. */
+#define NV4097_SET_TRANSFORM_CONSTANT           0x00001F00
+#define RSX_MAX_VERTEX_CONSTANTS                512
 
 /* Color mask */
 #define NV4097_SET_COLOR_MASK                   0x00000028
@@ -237,6 +242,17 @@ typedef struct rsx_state {
     u32 transform_program_load; /* vertex program load slot index */
     u32 transform_constant_load;
     int shader_dirty;
+
+    /* Vertex transform constants — written by NV4097_SET_TRANSFORM_CONSTANT.
+     * Each constant is a vec4 (4 floats). Games typically place the MVP
+     * matrix in the first few slots. Used by the backend as the vertex
+     * shader constant buffer when no RSX vertex program is translated. */
+    float vertex_constants[RSX_MAX_VERTEX_CONSTANTS][4];
+    /* Lowest and highest slot touched since last reset — used to push only
+     * the dirty range to the host CBV. */
+    u32 vertex_constants_lo;
+    u32 vertex_constants_hi;
+    int vertex_constants_dirty;
 
     /* Dirty flags for incremental state updates */
     int surface_dirty;

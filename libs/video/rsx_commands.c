@@ -446,6 +446,34 @@ int rsx_process_method(rsx_state* state, u32 method, u32 data)
         return 0;
     }
 
+    /* NV4097_SET_TRANSFORM_CONSTANT[0..63] — up to 64 dwords (16 vec4s) per
+     * command. Each register slot writes to a lane of one vertex constant
+     * vec4: vec_index = LOAD + (reg_offset/4), lane = reg_offset%4.
+     * The data arrives as a host-endian u32; reinterpret the bits as float
+     * because the game's intent is "these 32 bits are a float". The hardware
+     * does NOT auto-advance LOAD between commands — games re-issue
+     * SET_TRANSFORM_CONSTANT_LOAD before each block. */
+    if (method >= NV4097_SET_TRANSFORM_CONSTANT &&
+        method <  NV4097_SET_TRANSFORM_CONSTANT + 64 * 4) {
+        u32 reg_offset = (method - NV4097_SET_TRANSFORM_CONSTANT) / 4;
+        u32 slot = state->transform_constant_load + (reg_offset >> 2);
+        u32 lane = reg_offset & 3;
+        if (slot < RSX_MAX_VERTEX_CONSTANTS) {
+            float f;
+            memcpy(&f, &data, 4);
+            state->vertex_constants[slot][lane] = f;
+            if (!state->vertex_constants_dirty) {
+                state->vertex_constants_lo = slot;
+                state->vertex_constants_hi = slot;
+                state->vertex_constants_dirty = 1;
+            } else {
+                if (slot < state->vertex_constants_lo) state->vertex_constants_lo = slot;
+                if (slot > state->vertex_constants_hi) state->vertex_constants_hi = slot;
+            }
+        }
+        return 0;
+    }
+
     /* Draw */
     if (method == NV4097_SET_BEGIN_END) {
         if (data != 0) {

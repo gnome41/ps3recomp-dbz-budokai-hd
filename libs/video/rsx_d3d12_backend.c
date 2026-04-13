@@ -17,6 +17,7 @@
 #ifdef _WIN32
 
 #include "rsx_d3d12_backend.h"
+#include "rsx_primitives.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -46,6 +47,13 @@
 
 #define FRAME_COUNT         2   /* double buffering */
 #define MAX_VERTICES      4096  /* per-frame vertex buffer */
+#define MAX_DRAWS          256  /* per-frame draw records */
+
+typedef struct {
+    u32 vb_byte_offset; /* offset into vb_mapped where this draw's verts live */
+    u32 vertex_count;
+    u32 topology;       /* D3D_PRIMITIVE_TOPOLOGY_* */
+} D3D12DrawRecord;
 
 /* ---------------------------------------------------------------------------
  * Internal state
@@ -89,6 +97,7 @@ typedef struct {
     /* Per-frame draw recording */
     int                   frame_recording; /* 1 if cmd list is open for recording */
     u32                   draw_count;      /* draws this frame */
+    D3D12DrawRecord       draws[MAX_DRAWS];
 
     /* Pointer to current RSX state (set before draw calls) */
     const rsx_state*      current_rsx_state;
@@ -290,18 +299,32 @@ static int init_d3d12(u32 width, u32 height)
     memset(s_d3d.fence_values, 0, sizeof(s_d3d.fence_values));
 
     /* ---------------------------------------------------------------
-     * Create root signature (empty — no CBV/SRV/UAV for basic shader)
+     * Create root signature with 16 root constants (one mat4 MVP at b0).
+     * Visible only to the vertex shader — pixel shader doesn't need it.
      * ---------------------------------------------------------------*/
     {
+        D3D12_ROOT_PARAMETER root_params[1] = {0};
+        root_params[0].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        root_params[0].Constants.ShaderRegister = 0;   /* b0 */
+        root_params[0].Constants.RegisterSpace  = 0;
+        root_params[0].Constants.Num32BitValues = 16;  /* mat4 */
+        root_params[0].ShaderVisibility         = D3D12_SHADER_VISIBILITY_VERTEX;
+
         D3D12_ROOT_SIGNATURE_DESC rs_desc = {0};
-        rs_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+        rs_desc.NumParameters = 1;
+        rs_desc.pParameters   = root_params;
+        rs_desc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+                              | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
+                              | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
+                              | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
         ID3DBlob* signature_blob = NULL;
         ID3DBlob* error_blob = NULL;
         hr = D3D12SerializeRootSignature(&rs_desc, D3D_ROOT_SIGNATURE_VERSION_1,
                                           &signature_blob, &error_blob);
         if (FAILED(hr)) {
-            printf("[D3D12] Root signature serialization failed\n");
+            printf("[D3D12] Root signature serialization failed: %s\n",
+                   error_blob ? (const char*)error_blob->lpVtbl->GetBufferPointer(error_blob) : "?");
             if (error_blob) error_blob->lpVtbl->Release(error_blob);
             return -1;
         }
@@ -322,11 +345,27 @@ static int init_d3d12(u32 width, u32 height)
      * Compile shaders and create PSO
      * ---------------------------------------------------------------*/
     {
-        /* Basic vertex-colored shader */
+        /* Basic vertex-colored shader.
+         * The MVP matrix arrives via root constants as 4 vec4 columns
+         * (PS3/OpenGL column-major convention). We multiply explicitly so
+         * we don't depend on HLSL's matrix packing — matches PS3 semantics
+         * `gl_Position = MVP * vec4(pos, 1.0)`. */
         static const char vs_hlsl[] =
-            "struct VSInput { float3 pos : POSITION; float4 col : COLOR; };\n"
+            "cbuffer cb0 : register(b0) {\n"
+            "    float4 mvp_col0;\n"
+            "    float4 mvp_col1;\n"
+            "    float4 mvp_col2;\n"
+            "    float4 mvp_col3;\n"
+            "};\n"
+            "struct VSInput  { float3 pos : POSITION; float4 col : COLOR; };\n"
             "struct VSOutput { float4 pos : SV_POSITION; float4 col : COLOR; };\n"
-            "VSOutput main(VSInput i) { VSOutput o; o.pos = float4(i.pos, 1.0); o.col = i.col; return o; }\n";
+            "VSOutput main(VSInput i) {\n"
+            "    VSOutput o;\n"
+            "    float4 p = float4(i.pos, 1.0);\n"
+            "    o.pos = mvp_col0 * p.x + mvp_col1 * p.y + mvp_col2 * p.z + mvp_col3 * p.w;\n"
+            "    o.col = i.col;\n"
+            "    return o;\n"
+            "}\n";
         static const char ps_hlsl[] =
             "struct PSInput { float4 pos : SV_POSITION; float4 col : COLOR; };\n"
             "float4 main(PSInput i) : SV_TARGET { return i.col; }\n";
@@ -503,21 +542,52 @@ static void render_frame(void)
     s_d3d.cmd_list->lpVtbl->RSSetViewports(s_d3d.cmd_list, 1, &viewport);
     s_d3d.cmd_list->lpVtbl->RSSetScissorRects(s_d3d.cmd_list, 1, &scissor);
 
-    /* Bind pipeline state if available */
-    if (s_d3d.pipeline_ready) {
+    /* Bind pipeline state and push MVP if anything to draw */
+    if (s_d3d.pipeline_ready && s_d3d.draw_count > 0) {
         s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.root_signature);
         s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list, s_d3d.pipeline_state);
-        s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(
-            s_d3d.cmd_list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         s_d3d.cmd_list->lpVtbl->IASetVertexBuffers(s_d3d.cmd_list, 0, 1, &s_d3d.vb_view);
-    }
 
-    /* Draw accumulated geometry */
-    if (s_d3d.vb_offset > 0 && s_d3d.pipeline_ready) {
-        u32 vertex_count = s_d3d.vb_offset / 28; /* 28 bytes per vertex */
-        s_d3d.cmd_list->lpVtbl->DrawInstanced(s_d3d.cmd_list, vertex_count, 1, 0, 0);
+        /* Push the MVP matrix from RSX vertex constants slots 0..3.
+         * If the game hasn't written any constants (e.g. placeholder data
+         * already in clip space), fall back to identity. */
+        float mvp[16];
+        const rsx_state* st = s_d3d.current_rsx_state;
+        int have_mvp = 0;
+        if (st) {
+            for (u32 r = 0; r < 4; r++) {
+                for (u32 c = 0; c < 4; c++) {
+                    float v = st->vertex_constants[r][c];
+                    mvp[r * 4 + c] = v;
+                    if (v != 0.0f) have_mvp = 1;
+                }
+            }
+        }
+        if (!have_mvp) {
+            memset(mvp, 0, sizeof(mvp));
+            mvp[0] = mvp[5] = mvp[10] = mvp[15] = 1.0f; /* identity */
+        }
+        s_d3d.cmd_list->lpVtbl->SetGraphicsRoot32BitConstants(
+            s_d3d.cmd_list, 0 /*root param 0*/, 16, mvp, 0);
+
+        /* Replay each recorded draw with its own primitive topology.
+         * vb_byte_offset / sizeof(BasicVertex) gives the start vertex index. */
+        u32 last_topo = 0xFFFFFFFFu;
+        u32 draws = s_d3d.draw_count;
+        if (draws > MAX_DRAWS) draws = MAX_DRAWS;
+        for (u32 d = 0; d < draws; d++) {
+            const D3D12DrawRecord* dr = &s_d3d.draws[d];
+            if (dr->topology != last_topo) {
+                s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(s_d3d.cmd_list, dr->topology);
+                last_topo = dr->topology;
+            }
+            u32 start_vert = dr->vb_byte_offset / 28; /* 28 bytes per BasicVertex */
+            s_d3d.cmd_list->lpVtbl->DrawInstanced(
+                s_d3d.cmd_list, dr->vertex_count, 1, start_vert, 0);
+        }
     }
-    s_d3d.vb_offset = 0; /* reset for next frame */
+    s_d3d.vb_offset  = 0; /* reset for next frame */
+    s_d3d.draw_count = 0;
 
     /* Transition render target to PRESENT state */
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -599,8 +669,14 @@ static void d3d12_set_render_target(void* ud, const rsx_state* state)
 {
     (void)ud;
     s_d3d.current_rsx_state = state;
-    printf("[D3D12] set_render_target(%ux%u)\n",
-           state->surface_clip_w, state->surface_clip_h);
+    /* Log only the first few; set_render_target is called every frame and
+     * floods the log otherwise. */
+    static int s_count = 0;
+    if (s_count < 5) {
+        printf("[D3D12] set_render_target(%ux%u)\n",
+               state->surface_clip_w, state->surface_clip_h);
+        s_count++;
+    }
 }
 
 static void d3d12_set_viewport(void* ud, const rsx_state* state)
@@ -612,8 +688,10 @@ static void d3d12_set_viewport(void* ud, const rsx_state* state)
 
 /* Helper: read RSX vertex data from guest memory and convert to our BasicVertex format.
  * Reads position (float3) from attrib 0 and color (float4) from attrib 3.
- * If attribs aren't available, generates placeholder geometry. */
-static void upload_vertices_from_rsx(u32 first, u32 count)
+ * If attribs aren't available, generates placeholder geometry.
+ * Returns the actual number of vertices uploaded (may be less than `count`
+ * if the per-frame buffer is full). */
+static u32 upload_vertices_from_rsx(u32 first, u32 count)
 {
     extern uint8_t* vm_base;
     typedef struct { float x, y, z; float r, g, b, a; } BasicVertex;
@@ -700,23 +778,93 @@ static void upload_vertices_from_rsx(u32 first, u32 count)
         }
     }
     s_d3d.vb_offset += count * sizeof(BasicVertex);
+    return count;
 }
 
 static void d3d12_draw_arrays(void* ud, u32 primitive, u32 first, u32 count)
 {
     (void)ud;
-    static int log_count = 0;
-    if (log_count < 20) {
-        printf("[D3D12] draw_arrays(prim=%u, first=%u, count=%u)\n",
-               primitive, first, count);
-        log_count++;
+    /* Log the first 20 calls in detail, then every 1000th to show liveness
+     * without flooding. */
+    static u64 s_total = 0;
+    if (s_total < 20 || (s_total % 1000) == 0) {
+        printf("[D3D12] draw_arrays #%llu prim=%u first=%u count=%u\n",
+               (unsigned long long)s_total, primitive, first, count);
     }
+    s_total++;
 
     if (!s_d3d.pipeline_ready || !s_d3d.vb_mapped) return;
     if (count == 0 || count > MAX_VERTICES) return;
 
-    upload_vertices_from_rsx(first, count);
-    s_d3d.draw_count++;
+    /* One-shot: dump the MVP and first vertex on the very first draw so we
+     * can see what coordinate space the game is sending positions in. */
+    static int s_dumped = 0;
+    if (!s_dumped && s_d3d.current_rsx_state) {
+        extern uint8_t* vm_base;
+        s_dumped = 1;
+        const rsx_state* st = s_d3d.current_rsx_state;
+        printf("[D3D12-DUMP] vertex_constants slots 0..7:\n");
+        for (u32 i = 0; i < 8; i++) {
+            printf("  [%u] = (% .4f, % .4f, % .4f, % .4f)\n", i,
+                   st->vertex_constants[i][0], st->vertex_constants[i][1],
+                   st->vertex_constants[i][2], st->vertex_constants[i][3]);
+        }
+        printf("[D3D12-DUMP] vc dirty=%d range=[%u..%u]\n",
+               st->vertex_constants_dirty,
+               st->vertex_constants_lo, st->vertex_constants_hi);
+        printf("[D3D12-DUMP] viewport=%ux%u clip=%ux%u\n",
+               st->viewport_w, st->viewport_h,
+               st->surface_clip_w, st->surface_clip_h);
+        const rsx_vertex_attrib* pos = &st->vertex_attribs[0];
+        printf("[D3D12-DUMP] attrib0: enabled=%d type=%u size=%u stride=%u offset=0x%08X\n",
+               pos->enabled, pos->type, pos->size, pos->stride, pos->offset);
+        if (pos->enabled && pos->type == 2 && vm_base) {
+            for (u32 v = 0; v < (count < 4 ? count : 4); v++) {
+                u32 addr = pos->offset + (first + v) * pos->stride;
+                if (addr >= 0x20000000) break;
+                u8* src = vm_base + addr;
+                u32 fx, fy, fz;
+                memcpy(&fx, src,     4); fx = ((fx>>24)&0xFF)|((fx>>8)&0xFF00)|((fx<<8)&0xFF0000)|((fx<<24)&0xFF000000);
+                memcpy(&fy, src + 4, 4); fy = ((fy>>24)&0xFF)|((fy>>8)&0xFF00)|((fy<<8)&0xFF0000)|((fy<<24)&0xFF000000);
+                memcpy(&fz, src + 8, 4); fz = ((fz>>24)&0xFF)|((fz>>8)&0xFF00)|((fz<<8)&0xFF0000)|((fz<<24)&0xFF000000);
+                float x, y, z;
+                memcpy(&x, &fx, 4); memcpy(&y, &fy, 4); memcpy(&z, &fz, 4);
+                printf("[D3D12-DUMP] v[%u] pos=(% .4f, % .4f, % .4f)\n", v, x, y, z);
+            }
+        }
+    }
+
+    u32 topo = rsx_to_d3d12_topology(primitive);
+    if (topo == D3D_TOPOLOGY_UNDEFINED) {
+        /* Skip primitives we can't handle yet (quads etc.) rather than
+         * silently rendering them as the wrong shape. */
+        return;
+    }
+    /* The current PSO is TRIANGLE-type — IASetPrimitiveTopology must
+     * match. Point/line PSOs aren't implemented yet; skip such draws
+     * with a one-time warning so we don't hit a D3D12 topology/PSO
+     * mismatch. */
+    if (topo != D3D_TOPOLOGY_TRIANGLELIST && topo != D3D_TOPOLOGY_TRIANGLESTRIP) {
+        static int s_skipped_nontri = 0;
+        if (s_skipped_nontri < 3) {
+            printf("[D3D12] draw_arrays: skipping prim=%u topo=%u "
+                   "(non-triangle PSO not implemented yet)\n",
+                   primitive, topo);
+            s_skipped_nontri++;
+        }
+        return;
+    }
+
+    u32 record_offset = s_d3d.vb_offset;
+    u32 actual_count  = upload_vertices_from_rsx(first, count);
+    if (actual_count == 0) return;
+
+    if (s_d3d.draw_count < MAX_DRAWS) {
+        s_d3d.draws[s_d3d.draw_count].vb_byte_offset = record_offset;
+        s_d3d.draws[s_d3d.draw_count].vertex_count   = actual_count;
+        s_d3d.draws[s_d3d.draw_count].topology       = topo;
+        s_d3d.draw_count++;
+    }
 }
 
 static void d3d12_draw_indexed(void* ud, u32 primitive, u32 offset, u32 count)
