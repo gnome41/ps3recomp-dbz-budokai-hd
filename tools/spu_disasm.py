@@ -147,7 +147,9 @@ RI10_TABLE: dict[int, str] = {
     0b00100001: "shli",   # shift left word immediate
     0b00110010: "rotmi",  # rotate and mask word immediate
     0b00110011: "rotmai", # rotate and mask algebraic word immediate
-    0b00111110: "rotmhi", # rotate and mask halfword immediate
+    0b00111110: "rotmhi",  # rotate and mask halfword immediate (logical/unsigned)
+    0b00010010: "rotmahi", # rotate and mask algebraic halfword immediate (signed)
+                           # sh = (-I7)&31; 677 occurrences in SPURS kernel
     0b00111000: "rothi",  # rotate halfword immediate
     0b00110000: "roti",   # rotate word immediate
 }
