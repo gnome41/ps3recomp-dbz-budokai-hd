@@ -112,9 +112,10 @@ RI16_TABLE: dict[int, str] = {
     0b001000010: "brnz",  # branch if not zero word
     0b001000110: "brhz",  # branch if zero halfword
     0b001000111: "brhnz", # branch if not zero halfword
-    # Load/store relative (PC-relative 16-bit)
-    0b001100111: "lqr",   # load quadword relative
-    0b001100101: "stqr",  # store quadword relative
+    # NOTE: lqr(0x067)/stqr(0x065) are excluded here because they share op9
+    # with rotmai(op8=0x33)/rotmi(op8=0x32) when i10_top1=1.  All useful
+    # rotate-mask shifts use i10_top1=1, so lqr/stqr entries would mis-decode
+    # the majority of rotate instructions.  Treat them as .word for now.
 }
 
 # RI10 format: opcd(8) i10(10) ra(7) rt(7)
