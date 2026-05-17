@@ -926,6 +926,18 @@ class PPULifter:
                     f"uint32_t b = (ctx->cr >> (31 - {bb})) & 1; "
                     f"ctx->cr = (ctx->cr & ~(1u << (31 - {bt}))) | ((~(a ^ b) & 1) << (31 - {bt})); }}")
 
+        if mn == "crorc":
+            bt, ba, bb = int(ops[0]), int(ops[1]), int(ops[2])
+            return (f"{{ uint32_t a = (ctx->cr >> (31 - {ba})) & 1; "
+                    f"uint32_t b = (ctx->cr >> (31 - {bb})) & 1; "
+                    f"ctx->cr = (ctx->cr & ~(1u << (31 - {bt}))) | ((a | (~b & 1)) << (31 - {bt})); }}")
+
+        if mn == "crandc":
+            bt, ba, bb = int(ops[0]), int(ops[1]), int(ops[2])
+            return (f"{{ uint32_t a = (ctx->cr >> (31 - {ba})) & 1; "
+                    f"uint32_t b = (ctx->cr >> (31 - {bb})) & 1; "
+                    f"ctx->cr = (ctx->cr & ~(1u << (31 - {bt}))) | ((a & (~b & 1)) << (31 - {bt})); }}")
+
         # mcrf — move condition register field
         if mn == "mcrf":
             # mcrf crD, crS — copy 4-bit CR field
