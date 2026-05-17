@@ -1,4 +1,25 @@
-# ps3recomp
+# ps3recomp-dbz-budokai-hd
+
+> **⚠️ This is a fork of [sp00nznet/ps3recomp](https://github.com/sp00nznet/ps3recomp) maintained for the DBZ Budokai HD static recompilation project.**
+> All credit for the original SDK, runtime, and HLE library work goes to [sp00nznet](https://github.com/sp00nznet).
+> For the upstream project, general usage, or contributing to the SDK itself, go there — **not here**.
+
+## What's different in this fork
+
+Changes made on top of upstream for the DBZ Budokai HD port:
+
+| File | Change |
+|------|--------|
+| `tools/ppu_disasm.py` | Fix VMX XO extraction: AltiVec VX-form uses an 11-bit XO field (bits 21–31), not 10-bit (bits 21–30). Without this, ~3800 AltiVec instructions were decoded with the wrong opcode name. |
+| `tools/ppu_lifter.py` | Added 19 VMX instruction handlers (vspltb, vsplth, vrlb, vrlw, vsraw, vslb, vslw, vmaxsw, vmulouh, vmuleuh, vmulosh, vavgub, vaddsbs, vadduhs, vaddshs, vcmpequb, vpkshss, vmsummbm) so re-lifted code produces correct implementations instead of `vmx_x{N}` TODO stubs. Also added `crorc` and `crandc` CR logical-op handlers that were missing from the CR ops group. |
+| `runtime/syscalls/sys_ppu_thread.c` | Added stderr diagnostic logging for thread creation and startup, useful when debugging multi-threaded PPU recompilations. |
+| `tools/find_functions.py` | Replaced walrus-operator (`:=`) with a compatible form so the tool runs on Python 3.7 as well as 3.8+. |
+| `CLAUDE.md` | Project guidance file for Claude Code (AI assistant). |
+| `AGENTS.md` | Agent notes for this repo. |
+
+The game port itself (`dbz-budokai-hd/`) is in this repo's working tree but is **not tracked by git** — it contains generated recompiled code and game-specific patches that live separately.
+
+---
 
 ### *Because the Cell processor deserves a second life*
 
