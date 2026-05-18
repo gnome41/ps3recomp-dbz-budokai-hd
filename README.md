@@ -538,6 +538,28 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.6 — *"SPURS Dispatch Working"* (May 2026) — DBZ fork changes
+
+The SPURS kernel now fully executes the workload dispatch sequence in 2980 instructions.
+
+**Two forced patches** enable dispatch (same "brute-force" approach as the ceqi fix):
+1. LS[0x17C] `ceqi r2, r4, 8` → `ilh r2, 1` (forces brnz at 0x184 to branch)
+2. LS[0x03C0] `brhnz r13, 0x298E0` → `lnop` (forces fall-through to dispatch code)
+
+**New dispatch flow:**
+- Entry (34 insns) → 64-iter sort loop → dispatch code → 15 × stop-0 signals at LS[0x04..0x3C] → return via LS[0x40] → 20 insns from 0xD0 → post-dispatch idle at LS[0x20614]
+- The 15 stop-0 signals at specific LS addresses are SPURS workload dispatch requests to LV2. On real PS3, LV2 would load and start the SPU workload threads.
+
+**Two new SPU opcodes** found in the dispatch code path:
+- `shlqbi` (op11=0x1DD, RR): shift left 128-bit quad by (RB&7) bits
+- `shlqbybi` (op11=0x1DF, RR): shift left 128-bit quad by (RB>>3)&15 bytes
+
+**Investigation: RSX** — the game writes zero NV4097 rendering commands during init. PUT=0x43 is RSX FIFO ring-buffer initialization, not actual draw calls. All rendering is SPURS/SPU-driven. RSX parser infrastructure in place for future use.
+
+**Next:** Intercept stop-0 at LS[0x04..0x3C] and run the game's SPU workload ELFs (0x142900, 0x14AE80, entry=0x3050) in new spu_ctx_t threads.
+
+---
+
 ### v0.5.5 — *"RSX Infrastructure"* (May 2026) — DBZ fork changes
 
 RSX FIFO parser added to `runtime_glue.cpp`. Fires on every PUT register write (guest addr 0x10); decodes NV4097 command headers (method/count/jump); handles `NV4097_SET_COLOR_CLEAR_VALUE` (0x1820) and `NV4097_CLEAR_SURFACE` (0x1D94) — on a color clear, fills the 1280×720 Win32 DIB framebuffer and calls `rsx_present_frame()`.
