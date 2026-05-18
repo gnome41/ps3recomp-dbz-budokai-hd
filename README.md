@@ -538,6 +538,19 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.7 — *"EDGE Library Identified"* (May 2026) — DBZ fork changes
+
+Game workload ELF (guest 0x142900) is Sony SCEE's **EDGE SPU library** — the geometry/graphics processing framework. Identified via assertion string at LS[0xADD0]: `"EDGE ASSERTION FAILURE: %s(%d)\n"`.
+
+The EDGE library's stop-0x3FFF mechanism is a PPU callback for its task scheduler. EDGE dispatches geometry processing, decompression, and rendering sub-tasks via this callback. Implementing EDGE's PPU-side task manager is the next step to get actual game rendering.
+
+Workload execution (63 instructions) confirmed with multi-level SPURS dispatch hierarchy:
+1. SPURS kernel → 15 dispatch signals → EDGE SPU scheduler
+2. EDGE scheduler → stop 0x3FFF (PPU task load) → 15 more dispatch signals
+3. EDGE sub-tasks (not yet running) → actual game rendering
+
+---
+
 ### v0.5.6 — *"SPURS Dispatch Working"* (May 2026) — DBZ fork changes
 
 The SPURS kernel now fully executes the workload dispatch sequence in 2980 instructions.
