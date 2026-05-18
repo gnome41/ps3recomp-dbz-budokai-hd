@@ -538,6 +538,16 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.5 — *"RSX Infrastructure"* (May 2026) — DBZ fork changes
+
+RSX FIFO parser added to `runtime_glue.cpp`. Fires on every PUT register write (guest addr 0x10); decodes NV4097 command headers (method/count/jump); handles `NV4097_SET_COLOR_CLEAR_VALUE` (0x1820) and `NV4097_CLEAR_SURFACE` (0x1D94) — on a color clear, fills the 1280×720 Win32 DIB framebuffer and calls `rsx_present_frame()`.
+
+**Investigation result:** The game writes zero NV4097 rendering commands during init. PUT=0x43 is RSX FIFO ring-buffer initialization (DMA engine registers), not actual draw calls. The game's rendering loop is SPURS/SPU-driven — all NV4097 commands come from SPU workloads. RSX visible output requires SPURS workload dispatch (see v0.5.3/v0.5.4).
+
+GCM context at 0x70E000 now populated for both common cellGcmContext field layouts (+0x00/+0x04 AND +0x08/+0x0C current/begin) so either SDK version works. Framebuffer exports added to `main.cpp` (`rsx_framebuf()`, `rsx_fb_width()`, `rsx_fb_height()`).
+
+---
+
 ### v0.5.4 — *"Scan Loop Analysis"* (May 2026) — DBZ fork changes
 
 Full reverse-engineering of the SPURS kernel workload scan loop (LS[0x0310]–[0x038C]).
