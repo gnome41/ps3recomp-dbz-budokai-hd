@@ -538,6 +538,30 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.3 — *"SPURS Dispatch"* (May 2026) — DBZ fork changes
+
+SPU interpreter: the SPURS kernel now executes 2837 instructions and correctly reaches the "no work available" idle state.
+
+**`spu_interp.cpp` — new opcode: `rotqbii` (op11=0x1D4)**  
+Rotate quadword left by immediate bit count (RI7 format, I7 & 7 bits).  Was UNIMPL; used in the workload-init loop at LS[0x02C4] to spread 16 workload descriptor slots across LS (r8 = counter × 32). Without it, all 16 slot writes went to address 0, corrupting the workload table. Note: the existing code comment claiming `rotqbii = 0x1FB` was wrong — the actual kernel uses `0x1D4`.
+
+**`spu_spurs.cpp` — ceqi bypass + full dispatch trace**  
+Option A (change `SPURS_CTX_EA` to `0x70A000`) was analyzed and rejected: both 0x700000 and 0x70A000 have bits[20:17]=7, giving `r11.u8[2]=0x07` after `rothi(EA,12)`, so `r4.u32[0] = 0x07000008 ≠ 8` regardless.  
+Applied Option B: patch LS[0x17C] (`ceqi r2, r4, 8`) with `ilh r2, 1` (= `0x40000082`) to force `brnz` to fire.
+
+The kernel now:
+1. Passes the ceqi check → `brnz r2, dispatch` at LS[0x184] fires → jumps to LS[0x0280]
+2. Runs the 16-slot workload init loop (rotqbii now computes correct offsets)
+3. Loads workload availability address `r13 = 0x1F5F0` (via `ila r13, 0x1F5F0`)
+4. `brhnz r13, 0x298E0` at LS[0x03C0]: branches to "no work" idle (r13.high-halfword=1)
+5. LS[0x298E0] is intentional BSS (`stop 0`) — the kernel's mailbox-wait point on real PS3
+
+The burst now detects PC ≥ 0x29000 and ends early (was wasting 197 restarts on sequential stop-0s). Increased `SPURS_KERNEL_ELF_SIZE` to 0x36800 to confirm 0x298E0 is BSS (not truncated code).
+
+Next step: populate the CellSpurs workload descriptor at EA=0x70A000 so the kernel's `brhnz` sees a valid slot number (< 0x10000) and falls through to the dispatch path.
+
+---
+
 ### v0.5.2 — *"SPU Opcodes"* (May 2026) — DBZ fork changes
 
 SPU disassembler corrections discovered while tracing the embedded SPURS kernel in DBZ Budokai HD.  All fixes verified against actual SPURS kernel instruction traces.
