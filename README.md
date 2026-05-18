@@ -538,6 +538,28 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.2 — *"SPU Opcodes"* (May 2026) — DBZ fork changes
+
+SPU disassembler corrections discovered while tracing the embedded SPURS kernel in DBZ Budokai HD.  All fixes verified against actual SPURS kernel instruction traces.
+
+**`tools/spu_disasm.py` — opcode corrections**
+| Opcode | Was | Now |
+|--------|-----|-----|
+| `0x1DC` | unknown | `rotqbybi` (rotate quad by byte count = RB>>3) — **was the critical missing instruction** |
+| `0x1FC` | `rotqbybi` | `rotqby` (rotate quad by byte count from RB) |
+| `0x1DB` | unknown | `rotqbi` (rotate quad left by bit count from RB) |
+| `0x1FF` | `shlqbyi` (wrong semantics) | `rotqbyi` (rotate quad by byte immediate) |
+| `0x17F` | `rotqbyi` (wrong opcode) | `.word` (reserved) |
+| `0x1F8` | `rotqby` (wrong opcode) | `.word` (reserved) |
+| `0x07F` | `shlqbyi` (already correct in disasm) | — |
+
+Also added: `rotmahi` (0x12 RI10), `shlhi` (0x07A RI7), `xswd` (0x2AE RR), `sumb` (0x1B4 RR) in an earlier commit.
+
+**SPU kernel analysis (DBZ-specific, not in this SDK)**
+The SPURS kernel embedded at guest `0x10BD00` runs a 88-instruction cycle.  The missing `rotqbybi` caused a key `ceqi r2, r4, 8` check to always receive zero, keeping the kernel in the no-work/return loop indefinitely. With `rotqbybi` now implemented in the game project's `spu_interp.cpp`, the kernel reaches that check with `r4 = 0x07000008` — close but not yet exactly 8 (see `dbz-budokai-hd/CLAUDE.md` §SPU Interpreter for the full analysis and the one-line fix needed next session).
+
+---
+
 ### v0.5.1 — *"All-Register FIFO"* (April 2026)
 - **All-register FIFO flag clearing**: PhyreEngine sets +0x18 pending flags on r27/r28/r30/r26 (4 structures). Previously only cleared r31. Now clears all, solving 2 of 3 init spin levels.
 - **Watchdog CTR=0 patching**: Background thread detects NULL function pointer spins, patches heap objects with NOP OPDs.
