@@ -538,6 +538,20 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.4 — *"Scan Loop Analysis"* (May 2026) — DBZ fork changes
+
+Full reverse-engineering of the SPURS kernel workload scan loop (LS[0x0310]–[0x038C]).
+
+**Algorithm discovered:** The kernel runs a 64-iteration priority sort loop (`ceqi r9, r10, 64`) that builds a sorted dispatch table at LS[0x0C41C+]. The "no workload" exit path (`brhnz r13, 0x298E0`) always fires because `r13=0x1F5F0` (set by `ila r13, 0x1F5F0`) and no DMA from the management area fills `r79/r77` with workload-ready bitmask data. The kernel correctly waits for a PPU mailbox signal via `rdch CH_SPU_RdInMbox` (stop-0 at LS[0x298E0] = LV2 yield point).
+
+**LS data structures mapped:** Sort order table at 0x1F5B0, priority lookup at 0x1F5F0, shift-mask table at 0x1F630, sorted dispatch table at 0x0C41C.
+
+**All scan loop UNIMPL instructions resolved:** `xswd` (op11=0x2AE) and `fscrrd/zeroes-RT` (op11=0x2B6) were already implemented. `rotqbii` (op11=0x1D4) added in v0.5.3.
+
+**For next session:** Implement minimal `cellSpursAddWorkload` HLE + send inbound mailbox signal to wake the kernel → r79 gets populated → workload dispatches.
+
+---
+
 ### v0.5.3 — *"SPURS Dispatch"* (May 2026) — DBZ fork changes
 
 SPU interpreter: the SPURS kernel now executes 2837 instructions and correctly reaches the "no work available" idle state.
