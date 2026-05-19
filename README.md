@@ -296,6 +296,7 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full walkthrough.
 |------|----------|--------|------|
 | **flOw** (thatgamecompany) | NPUA80001 | 92K functions, game reaches main() init, module loading + sysutil callbacks working, trampoline system for split-function chains, ~10K TODOs, D3D12 backend ready | [sp00nznet/flow](https://github.com/sp00nznet/flow) |
 | **Tokyo Jungle** (Crispy's/SCE Japan) | NPUA80523 | 33K functions lifted, CRT init + HLE framework wired, indirect call dispatch | [sp00nznet/tokyojungle](https://github.com/sp00nznet/tokyojungle) |
+| **DBZ Budokai HD** (Spike Chunsoft) | BLES01658 | Full startup lifecycle working: SPURS state machine 2→21, SPURS SPU kernel (2980+ insns/cycle), Sony EDGE SPU library running (15 slots × 47 insns, 8427+ DMA reads confirmed), game main init complete, 1280×720 Win32 window, clean exit. Next: real EDGE geometry data → RSX rendering | [gnome41/dbz-budokai-hd](https://github.com/gnome41/dbz-budokai-hd) |
 
 Want to port a game? Start with the [Getting Started](#getting-started) section, check [docs/MODULE_STATUS.md](docs/MODULE_STATUS.md) for system library coverage, and see the [flOw case study](docs/GAME_PORTING_GUIDE.md#case-study-flow) for a real-world walkthrough.
 
