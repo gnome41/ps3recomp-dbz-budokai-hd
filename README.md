@@ -538,6 +538,25 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 *"The Cell Processor was ahead of its time. Now it's time to bring it to ours."*
 
+### v0.5.8 — *"EDGE DMA Working"* (May 2026) — DBZ fork changes
+
+The EDGE SPU geometry processor (at LS[0x3108] in workload 1) now issues real MFC DMA operations.
+
+**Two new opcodes** found in the EDGE geometry code path:
+- `op11=0x1FD` — lqx variant (load quadword indexed: `LS[RA+RB] → RT`). Loads the task descriptor from LS to extract geometry source EAs.
+- `op11=0x3F8` — orx variant (OR across 4 words of RA into RT.u32[0]).
+
+**EDGE DMA confirmed:** With a synthetic task descriptor, the geometry processor issues 8427+ DMA reads (64 bytes each from the descriptor's source EA). The processor loops continuously processing geometry batches. With proper EDGE-format geometry data, it would produce vertex shader inputs for RSX rendering.
+
+**EDGE workload lifecycle** (fully traced):
+1. Entry (30 insns): SPURS framework init → stop-0 yield
+2. Scheduler (13 insns → stop-0x3FFF): task context request (r3=0x01000100, r4=0xADD0)
+3. Task dispatcher calls geometry processor (LS[0x3108]) with task descriptor
+4. Geometry processor: lqx loads descriptor → rotqbyi extracts source EA → MFC DMA reads geometry data
+5. (With real data): transforms vertices → writes RSX commands → visible rendering
+
+---
+
 ### v0.5.7 — *"EDGE Library Identified"* (May 2026) — DBZ fork changes
 
 Game workload ELF (guest 0x142900) is Sony SCEE's **EDGE SPU library** — the geometry/graphics processing framework. Identified via assertion string at LS[0xADD0]: `"EDGE ASSERTION FAILURE: %s(%d)\n"`.
